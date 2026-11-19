@@ -53,14 +53,21 @@ jobs:
       - name: Test van de rekenlogica
         run: python3 test/test_omgeving.py
 
-      - name: Geofabrik-bestand ophalen
+      - name: Landbestand ophalen (Geofabrik, anders reservebron)
         run: |
           mkdir -p data
-          curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors \
-            -A "Routemaatje-omgeving (info@routemaatje.nl)" \
-            -o data/land.osm.pbf \
-            "https://download.geofabrik.de/${{ matrix.pad }}-latest.osm.pbf"
+          UA="Routemaatje-omgeving (info@routemaatje.nl)"
+          if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 10 --retry-all-errors -A "$UA" \
+               -o data/land.osm.pbf "https://download.geofabrik.de/${{ matrix.pad }}-latest.osm.pbf"; then
+            echo "Bron: Geofabrik"
+          else
+            echo "Geofabrik niet bereikbaar, reservebron: OpenStreetMap-France"
+            curl -fsSL --connect-timeout 20 --retry 3 --retry-delay 20 --retry-all-errors -A "$UA" \
+              -D data/kop.txt -o data/land.osm.pbf "https://download.openstreetmap.fr/extracts/${{ matrix.pad }}-latest.osm.pbf"
+            grep -i '^last-modified' data/kop.txt || true
+          fi
           ls -lh data/land.osm.pbf
+          osmium fileinfo -g header.option.osmosis_replication_timestamp data/land.osm.pbf || true
 
       - name: Filteren en omzetten
         run: |
