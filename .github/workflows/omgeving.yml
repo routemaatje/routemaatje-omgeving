@@ -1,0 +1,102 @@
+name: Omgeving berekenen
+
+# Rekent per land de omgeving van campings en camperplaatsen uit OpenStreetMap (Geofabrik):
+# water, rivier, kust, bos, natuurgebied, bergtoppen, supermarkt, restaurants, wandel- en fietsroutes.
+# Het resultaat (omgeving-LAND.ndjson.gz) komt als bijlage bij de release "data" van deze repository.
+# De Routemaatje-server haalt het daar op. Er zijn geen wachtwoorden of geheimen voor nodig.
+#
+# Welke landen meedoen: repository-variabele OMGEVING_LANDEN (bijv. "lu" of "lu,nl,be").
+# Zonder die variabele doet alleen Luxemburg mee (klein, voor de eerste test).
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  land:
+    name: ${{ matrix.land }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - { land: lu, pad: europe/luxembourg }
+          - { land: nl, pad: europe/netherlands }
+          - { land: be, pad: europe/belgium }
+          - { land: at, pad: europe/austria }
+          - { land: ch, pad: europe/switzerland }
+          - { land: pt, pad: europe/portugal }
+          - { land: es, pad: europe/spain }
+          - { land: it, pad: europe/italy }
+          - { land: fr, pad: europe/france }
+          - { land: de, pad: europe/germany }
+    if: contains(format(',{0},', vars.OMGEVING_LANDEN || 'lu'), format(',{0},', matrix.land))
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gereedschap installeren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          python3 -m pip install --quiet numpy scipy
+
+      - name: Test van de rekenlogica
+        run: python3 test/test_omgeving.py
+
+      - name: Geofabrik-bestand ophalen
+        run: |
+          mkdir -p data
+          curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors \
+            -A "Routemaatje-omgeving (info@routemaatje.nl)" \
+            -o data/land.osm.pbf \
+            "https://download.geofabrik.de/${{ matrix.pad }}-latest.osm.pbf"
+          ls -lh data/land.osm.pbf
+
+      - name: Filteren en omzetten
+        run: |
+          set -euo pipefail
+          cd data
+          osmium tags-filter land.osm.pbf \
+            nwr/tourism=camp_site,caravan_site \
+            nwr/natural=water,coastline,beach,peak,volcano,wood \
+            nwr/waterway=river \
+            nwr/landuse=forest,reservoir \
+            nwr/leisure=nature_reserve \
+            nwr/boundary=national_park,protected_area \
+            nwr/shop=supermarket \
+            nwr/amenity=restaurant \
+            -o gefilterd.osm.pbf --overwrite
+          osmium export gefilterd.osm.pbf -f geojsonseq \
+            --geometry-types=point,linestring,polygon --add-unique-id=type_id \
+            -o export.geojsonseq --overwrite
+          for soort in hiking bicycle; do
+            osmium tags-filter land.osm.pbf r/route=$soort -o r-$soort.osm.pbf --overwrite
+            osmium add-locations-to-ways r-$soort.osm.pbf -o r-$soort-l.osm.pbf --overwrite
+            osmium export r-$soort-l.osm.pbf -f geojsonseq --geometry-types=linestring --keep-untagged \
+              -o routes-$soort.geojsonseq --overwrite
+          done
+          ls -lh
+
+      - name: Omgeving berekenen
+        run: |
+          set -euo pipefail
+          mkdir -p uit
+          python3 omgeving.py "${{ matrix.land }}" data/export.geojsonseq \
+            data/routes-hiking.geojsonseq data/routes-bicycle.geojsonseq \
+            -o "uit/omgeving-${{ matrix.land }}.ndjson.gz" --datum "$(date -u +%Y%m%d)"
+          ls -lh uit
+
+      - name: Publiceren bij de release "data"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view data >/dev/null 2>&1 || gh release create data \
+            --title "Omgevingsgegevens" \
+            --notes "Per land berekend uit OpenStreetMap (ODbL, © OpenStreetMap-bijdragers). Wordt elke week ververst."
+          gh release upload data "uit/omgeving-${{ matrix.land }}.ndjson.gz" --clobber
