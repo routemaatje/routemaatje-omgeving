@@ -88,7 +88,7 @@ jobs:
             -o export.geojsonseq --overwrite
           for soort in hiking bicycle; do
             osmium tags-filter land.osm.pbf r/route=$soort -o r-$soort.osm.pbf --overwrite
-            osmium add-locations-to-ways r-$soort.osm.pbf -o r-$soort-l.osm.pbf --overwrite
+            osmium add-locations-to-ways --ignore-missing-nodes r-$soort.osm.pbf -o r-$soort-l.osm.pbf --overwrite
             osmium export r-$soort-l.osm.pbf -f geojsonseq --geometry-types=linestring --keep-untagged \
               -o routes-$soort.geojsonseq --overwrite
           done
