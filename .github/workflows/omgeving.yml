@@ -16,26 +16,31 @@ permissions:
   contents: write
 
 jobs:
+  plan:
+    name: Landen kiezen
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.kies.outputs.matrix }}
+    steps:
+      - id: kies
+        env:
+          LANDEN: ${{ vars.OMGEVING_LANDEN || 'lu' }}
+        run: |
+          ALLE='[{"land":"lu","pad":"europe/luxembourg"},{"land":"nl","pad":"europe/netherlands"},{"land":"be","pad":"europe/belgium"},{"land":"at","pad":"europe/austria"},{"land":"ch","pad":"europe/switzerland"},{"land":"pt","pad":"europe/portugal"},{"land":"es","pad":"europe/spain"},{"land":"it","pad":"europe/italy"},{"land":"fr","pad":"europe/france"},{"land":"de","pad":"europe/germany"}]'
+          KEUZE="$(echo "$ALLE" | jq -c --arg l ",${LANDEN// /}," '[.[] | select(. as $o | $l | contains("," + $o.land + ","))]')"
+          echo "Gekozen: $KEUZE"
+          echo "matrix=$KEUZE" >> "$GITHUB_OUTPUT"
+
   land:
     name: ${{ matrix.land }}
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include:
-          - { land: lu, pad: europe/luxembourg }
-          - { land: nl, pad: europe/netherlands }
-          - { land: be, pad: europe/belgium }
-          - { land: at, pad: europe/austria }
-          - { land: ch, pad: europe/switzerland }
-          - { land: pt, pad: europe/portugal }
-          - { land: es, pad: europe/spain }
-          - { land: it, pad: europe/italy }
-          - { land: fr, pad: europe/france }
-          - { land: de, pad: europe/germany }
-    if: contains(format(',{0},', vars.OMGEVING_LANDEN || 'lu'), format(',{0},', matrix.land))
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
