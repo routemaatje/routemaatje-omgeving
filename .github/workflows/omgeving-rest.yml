@@ -1,0 +1,97 @@
+name: Omgeving rest van Europa
+
+# Landen die de OpenStreetMap-France-spiegel niet heeft (en Geofabrik blokkeert GitHub):
+# Denemarken, Kroatie, Hongarije, Estland, Roemenie, Griekenland, Litouwen, Slovenie, IJsland en Ierland.
+# Bron: de kopie van de Geofabrik-Europa-extract bij GWDG (ftp.gwdg.de). Per land wordt een doos uitgesneden (alle landen
+# in een keer, een doorloop van het grote bestand) en daarna dezelfde berekening gedaan als in "Omgeving berekenen".
+# Resultaat: omgeving-LAND.ndjson.gz bij de release "data". Er zijn geen wachtwoorden of geheimen nodig.
+on:
+  schedule:
+    - cron: "0 2 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rest:
+    name: Rest van Europa
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gereedschap installeren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          python3 -m pip install --quiet numpy scipy
+
+      - name: Test van de rekenlogica
+        run: python3 test/test_omgeving.py
+
+      - name: Europa ophalen (kopie bij GWDG)
+        run: |
+          sudo mkdir -p /mnt/osm
+          sudo chown "$USER" /mnt/osm
+          curl -fSL --connect-timeout 30 --retry 5 --retry-delay 30 --retry-all-errors -C - -A "Routemaatje-omgeving (info@routemaatje.nl)" -o /mnt/osm/europa.osm.pbf https://ftp.gwdg.de/pub/misc/openstreetmap/download.geofabrik.de/europe-latest.osm.pbf
+          ls -lh /mnt/osm
+          df -h /mnt
+
+      - name: Landen uitsnijden
+        run: |
+          cd /mnt/osm
+          python3 - <<'PY'
+          import json
+          kern = {
+              "dk": [7.9, 54.5, 15.3, 57.8],
+              "hr": [13.4, 42.3, 19.5, 46.6],
+              "hu": [16.0, 45.7, 22.95, 48.65],
+              "ee": [21.7, 57.4, 28.3, 59.75],
+              "ro": [20.2, 43.6, 29.8, 48.35],
+              "gr": [19.3, 34.7, 28.4, 41.8],
+              "lt": [20.9, 53.85, 26.9, 56.5],
+              "si": [13.35, 45.4, 16.65, 46.9],
+              "is": [-24.6, 63.3, -13.4, 66.6],
+              "ie": [-10.8, 51.3, -5.3, 55.5],
+          }
+          json.dump(kern, open("tegels.json", "w"))
+          cfg = {"directory": "/mnt/osm", "extracts": [{"output": k + ".osm.pbf", "bbox": [round(b[0] - 0.15, 2), round(b[1] - 0.15, 2), round(b[2] + 0.15, 2), round(b[3] + 0.15, 2)]} for k, b in kern.items()]}
+          json.dump(cfg, open("cfg.json", "w"))
+          PY
+          osmium extract -c cfg.json --strategy=smart --overwrite europa.osm.pbf
+          rm -f europa.osm.pbf
+          ls -lh
+
+      - name: Omgeving berekenen en publiceren
+        run: |
+          cat > /mnt/osm/land.sh <<'SH'
+          set -euo pipefail
+          l="$1"
+          cd /mnt/osm
+          kern="$(python3 -c "import json;print(','.join(map(str,json.load(open('tegels.json'))['$l'])))")"
+          rm -rf "w-$l"
+          mkdir "w-$l"
+          cd "w-$l"
+          osmium tags-filter "../$l.osm.pbf" nwr/tourism=camp_site,caravan_site nwr/natural=water,coastline,beach,peak,volcano,wood nwr/waterway=river nwr/landuse=forest,reservoir nwr/leisure=nature_reserve nwr/boundary=national_park,protected_area nwr/shop=supermarket nwr/amenity=restaurant -o gefilterd.osm.pbf --overwrite
+          osmium export gefilterd.osm.pbf -f geojsonseq --geometry-types=point,linestring,polygon --add-unique-id=type_id -o export.geojsonseq --overwrite
+          for soort in hiking bicycle; do
+            osmium tags-filter "../$l.osm.pbf" r/route=$soort -o r-$soort.osm.pbf --overwrite
+            osmium add-locations-to-ways --ignore-missing-nodes r-$soort.osm.pbf -o r-$soort-l.osm.pbf --overwrite
+            osmium export r-$soort-l.osm.pbf -f geojsonseq --geometry-types=linestring --keep-untagged -o routes-$soort.geojsonseq --overwrite
+          done
+          mkdir -p ../uit
+          python3 "$GITHUB_WORKSPACE/omgeving.py" "$l" export.geojsonseq routes-hiking.geojsonseq routes-bicycle.geojsonseq -o "../uit/omgeving-$l.ndjson.gz" --datum "$(date -u +%Y%m%d)" --kern="$kern"
+          gh release view data >/dev/null 2>&1 || gh release create data --title "Omgevingsgegevens" --notes "Per land berekend uit OpenStreetMap (ODbL, OpenStreetMap-bijdragers). Wordt elke week ververst."
+          gh release upload data "../uit/omgeving-$l.ndjson.gz" --clobber
+          SH
+          cd /mnt/osm
+          gefaald=""
+          for l in dk hr hu ee ro gr lt si is ie; do
+            echo "=== $l"
+            if ! bash /mnt/osm/land.sh "$l"; then gefaald="$gefaald $l"; fi
+            rm -rf "/mnt/osm/w-$l" "/mnt/osm/$l.osm.pbf"
+          done
+          if [ -n "$gefaald" ]; then echo "Mislukt:$gefaald"; exit 1; fi
