@@ -26,13 +26,13 @@ jobs:
         env:
           LANDEN: ${{ vars.OMGEVING_LANDEN || 'lu' }}
         run: |
-          ALLE='[{"land":"lu","pad":"europe/luxembourg"},{"land":"nl","pad":"europe/netherlands"},{"land":"be","pad":"europe/belgium"},{"land":"at","pad":"europe/austria"},{"land":"ch","pad":"europe/switzerland"},{"land":"pt","pad":"europe/portugal"},{"land":"es","pad":"europe/spain"},{"land":"it","pad":"europe/italy"},{"land":"fr","pad":"europe/france"},{"land":"de","pad":"europe/germany"},{"land":"gb","pad":"europe/united-kingdom"},{"land":"no","pad":"europe/norway"},{"land":"se","pad":"europe/sweden"},{"land":"pl","pad":"europe/poland"},{"land":"cz","pad":"europe/czech-republic"},{"land":"fi","pad":"europe/finland"}]'
+          ALLE='[{"land":"lu","pad":"europe/luxembourg"},{"land":"nl","pad":"europe/netherlands"},{"land":"be","pad":"europe/belgium"},{"land":"at","pad":"europe/austria"},{"land":"ch","pad":"europe/switzerland"},{"land":"pt","pad":"europe/portugal"},{"land":"es","pad":"europe/spain"},{"land":"it","pad":"europe/italy"},{"land":"fr","code":"fr1","pad":"europe/france","kern":"-6,41,1.5,45","extract":"-6.15,40.85,1.65,45.15"},{"land":"fr","code":"fr2","pad":"europe/france","kern":"1.5,41,10,45","extract":"1.35,40.85,10.15,45.15"},{"land":"fr","code":"fr3","pad":"europe/france","kern":"-6,45,0.5,48","extract":"-6.15,44.85,0.65,48.15"},{"land":"fr","code":"fr4","pad":"europe/france","kern":"0.5,45,4,48","extract":"0.35,44.85,4.15,48.15"},{"land":"fr","code":"fr5","pad":"europe/france","kern":"4,45,10,48","extract":"3.85,44.85,10.15,48.15"},{"land":"fr","code":"fr6","pad":"europe/france","kern":"-6,48,1,52","extract":"-6.15,47.85,1.15,52.15"},{"land":"fr","code":"fr7","pad":"europe/france","kern":"1,48,4,52","extract":"0.85,47.85,4.15,52.15"},{"land":"fr","code":"fr8","pad":"europe/france","kern":"4,48,10,52","extract":"3.85,47.85,10.15,52.15"},{"land":"de","code":"de1","pad":"europe/germany","kern":"5,47,9.5,49.5","extract":"4.85,46.85,9.65,49.65"},{"land":"de","code":"de2","pad":"europe/germany","kern":"9.5,47,16,49.5","extract":"9.35,46.85,16.15,49.65"},{"land":"de","code":"de3","pad":"europe/germany","kern":"5,49.5,9.5,51.5","extract":"4.85,49.35,9.65,51.65"},{"land":"de","code":"de4","pad":"europe/germany","kern":"9.5,49.5,16,51.5","extract":"9.35,49.35,16.15,51.65"},{"land":"de","code":"de5","pad":"europe/germany","kern":"5,51.5,10.5,56","extract":"4.85,51.35,10.65,56.15"},{"land":"de","code":"de6","pad":"europe/germany","kern":"10.5,51.5,16,56","extract":"10.35,51.35,16.15,56.15"},{"land":"gb","pad":"europe/united-kingdom"},{"land":"no","pad":"europe/norway"},{"land":"se","pad":"europe/sweden"},{"land":"pl","pad":"europe/poland"},{"land":"cz","pad":"europe/czech-republic"},{"land":"fi","pad":"europe/finland"}]'
           KEUZE="$(echo "$ALLE" | jq -c --arg l ",${LANDEN// /}," '[.[] | select(. as $o | $l | contains("," + $o.land + ","))]')"
           echo "Gekozen: $KEUZE"
           echo "matrix=$KEUZE" >> "$GITHUB_OUTPUT"
 
   land:
-    name: ${{ matrix.land }}
+    name: ${{ matrix.code || matrix.land }}
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 300
@@ -69,6 +69,15 @@ jobs:
           ls -lh data/land.osm.pbf
           osmium fileinfo -g header.option.osmosis_replication_timestamp data/land.osm.pbf || true
 
+      - name: Tegel uitsnijden (Frankrijk en Duitsland)
+        if: matrix.extract
+        run: |
+          set -euo pipefail
+          cd data
+          osmium extract -b "${{ matrix.extract }}" --strategy=smart land.osm.pbf -o tegel.osm.pbf --overwrite
+          mv tegel.osm.pbf land.osm.pbf
+          ls -lh land.osm.pbf
+
       - name: Filteren en omzetten
         run: |
           set -euo pipefail
@@ -95,12 +104,14 @@ jobs:
           ls -lh
 
       - name: Omgeving berekenen
+        env:
+          KERN: ${{ matrix.kern }}
         run: |
           set -euo pipefail
           mkdir -p uit
           python3 omgeving.py "${{ matrix.land }}" data/export.geojsonseq \
             data/routes-hiking.geojsonseq data/routes-bicycle.geojsonseq \
-            -o "uit/omgeving-${{ matrix.land }}.ndjson.gz" --datum "$(date -u +%Y%m%d)"
+            -o "uit/omgeving-${{ matrix.code || matrix.land }}.ndjson.gz" --datum "$(date -u +%Y%m%d)" ${KERN:+--kern="$KERN"}
           ls -lh uit
 
       - name: Publiceren bij de release "data"
@@ -111,4 +122,4 @@ jobs:
           gh release view data >/dev/null 2>&1 || gh release create data \
             --title "Omgevingsgegevens" \
             --notes "Per land berekend uit OpenStreetMap (ODbL, © OpenStreetMap-bijdragers). Wordt elke week ververst."
-          gh release upload data "uit/omgeving-${{ matrix.land }}.ndjson.gz" --clobber
+          gh release upload data "uit/omgeving-${{ matrix.code || matrix.land }}.ndjson.gz" --clobber
