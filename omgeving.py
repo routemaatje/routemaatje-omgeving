@@ -273,6 +273,7 @@ def main():
     ap.add_argument("routes_fiets", nargs="?")
     ap.add_argument("-o", "--uit", required=True)
     ap.add_argument("--datum", default=datetime.now(timezone.utc).strftime("%Y%m%d"))
+    ap.add_argument("--kern", default=None, help="minlon,minlat,maxlon,maxlat: alleen campings met middelpunt in deze doos (tegels)")
     a = ap.parse_args()
 
     v = Verzamelaar()
@@ -282,6 +283,10 @@ def main():
         v.voeg_route_lijnen("wandel", a.routes_wandel)
     if a.routes_fiets:
         v.voeg_route_lijnen("fiets", a.routes_fiets)
+
+    if a.kern:
+        x0, y0, x1, y1 = [float(s) for s in a.kern.split(",")]
+        v.campings = [c for c in v.campings if x0 <= c[3] < x1 and y0 <= c[2] < y1]
 
     tel = bereken(v)
     with gzip.open(a.uit, "wt", encoding="utf-8") as f:
