@@ -26,7 +26,7 @@ jobs:
         env:
           LANDEN: ${{ vars.OMGEVING_LANDEN || 'lu' }}
         run: |
-          ALLE='[{"land":"lu","pad":"europe/luxembourg"},{"land":"nl","pad":"europe/netherlands"},{"land":"be","pad":"europe/belgium"},{"land":"at","pad":"europe/austria"},{"land":"ch","pad":"europe/switzerland"},{"land":"pt","pad":"europe/portugal"},{"land":"es","pad":"europe/spain"},{"land":"it","pad":"europe/italy"},{"land":"fr","pad":"europe/france"},{"land":"de","pad":"europe/germany"}]'
+          ALLE='[{"land":"lu","pad":"europe/luxembourg"},{"land":"nl","pad":"europe/netherlands"},{"land":"be","pad":"europe/belgium"},{"land":"at","pad":"europe/austria"},{"land":"ch","pad":"europe/switzerland"},{"land":"pt","pad":"europe/portugal"},{"land":"es","pad":"europe/spain"},{"land":"it","pad":"europe/italy"},{"land":"fr","pad":"europe/france"},{"land":"de","pad":"europe/germany"},{"land":"gb","pad":"europe/united-kingdom"},{"land":"no","pad":"europe/norway"},{"land":"se","pad":"europe/sweden"},{"land":"pl","pad":"europe/poland"},{"land":"cz","pad":"europe/czech-republic"},{"land":"fi","pad":"europe/finland"}]'
           KEUZE="$(echo "$ALLE" | jq -c --arg l ",${LANDEN// /}," '[.[] | select(. as $o | $l | contains("," + $o.land + ","))]')"
           echo "Gekozen: $KEUZE"
           echo "matrix=$KEUZE" >> "$GITHUB_OUTPUT"
@@ -63,7 +63,7 @@ jobs:
           else
             echo "Geofabrik niet bereikbaar, reservebron: OpenStreetMap-France"
             curl -fsSL --connect-timeout 20 --retry 3 --retry-delay 20 --retry-all-errors -A "$UA" \
-              -D data/kop.txt -o data/land.osm.pbf "https://download.openstreetmap.fr/extracts/${{ matrix.pad }}-latest.osm.pbf"
+              -D data/kop.txt -o data/land.osm.pbf "https://download.openstreetmap.fr/extracts/$(echo "${{ matrix.pad }}" | tr - _)-latest.osm.pbf"
             grep -i '^last-modified' data/kop.txt || true
           fi
           ls -lh data/land.osm.pbf
