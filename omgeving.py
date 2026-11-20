@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 import numpy as np
 from scipy.spatial import cKDTree
 
-VERSIE = 1
+VERSIE = 2
 AARDE = 6371008.8
 
 # categorie -> afstanden in meter
@@ -160,8 +160,10 @@ def split_id(fid):
     """osmium-id 'w123' / 'n5' / 'r9' -> ('w', 123)."""
     s = str(fid)
     if s and s[0] in "nwra" and s[1:].isdigit():
-        t = "w" if s[0] == "a" else s[0]
-        return t, int(s[1:])
+        n = int(s[1:])
+        if s[0] == "a":   # osmium-vlak: even = way (nummer / 2), oneven = relatie ((nummer - 1) / 2)
+            return ("w", n // 2) if n % 2 == 0 else ("r", n // 2)
+        return s[0], n
     return None, None
 
 
